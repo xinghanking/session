@@ -1,4 +1,4 @@
-package session
+package redis_session
 
 import (
 	"encoding/base64"
@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
 	"github.com/google/uuid"
+	"time"
 )
 
 type Options struct {
@@ -17,7 +18,7 @@ type Options struct {
 	MaxAge         int
 	Secure         bool
 	HttpOnly       bool
-	Expiration     int64
+	Expiration     time.Duration
 }
 
 var Session *Options
@@ -42,27 +43,26 @@ func (s *Options) UnSerialize(value string) (map[string]any, error) {
 	return data, nil
 }
 func Init(options *Options) gin.HandlerFunc {
-	Session = options
 	if options.RedisStore == nil {
 		err := errors.New("redis store is nil")
 		panic(err)
 	}
 	return func(Context *gin.Context) {
-		if Session.SessionName == "" {
-			Session.SessionName = "PHPSESSID"
+		if options.SessionName == "" {
+			options.SessionName = "PHPSESSID"
 		}
-		SessionName = Session.SessionName
-		SessionID, _ = Context.Cookie(Session.SessionName)
+		SessionName = options.SessionName
+		SessionID, _ = Context.Cookie(options.SessionName)
 		if SessionID == "" {
 			SessionID = base64.URLEncoding.EncodeToString([]byte(uuid.NewString()))
 			Values = make(map[string]any)
 			Context.SetCookie(SessionName, SessionID, 864000, "/", Context.Request.Host, false, false)
 		}
-		if Session.RedisKeyPrefix == "" {
-			Session.RedisKeyPrefix = "PHPREDIS_SESSION:"
+		if options.RedisKeyPrefix == "" {
+			options.RedisKeyPrefix = "PHPREDIS_SESSION:"
 		}
-		StoreKey = Session.RedisKeyPrefix + SessionID
-		data, err := Session.RedisStore.Get(StoreKey).Result()
+		StoreKey = options.RedisKeyPrefix + SessionID
+		data, err := options.RedisStore.Get(StoreKey).Result()
 		if err != nil {
 			if !errors.Is(err, redis.Nil) {
 				panic(err)
@@ -70,11 +70,12 @@ func Init(options *Options) gin.HandlerFunc {
 			Values = make(map[string]any)
 		}
 		if data != "" {
-			Values, err = Session.UnSerialize(data)
+			Values, err = options.UnSerialize(data)
 			if err != nil {
 				fmt.Println(err)
 			}
 		}
+		Session = options
 		defer Save()
 		Context.Next()
 	}
@@ -95,7 +96,7 @@ func Save() {
 		if err != nil {
 			fmt.Println(err)
 		} else {
-			Session.RedisStore.Set(StoreKey, data, 0)
+			Session.RedisStore.Set(StoreKey, data, Session.Expiration)
 		}
 	}
 }
