@@ -35,12 +35,16 @@ func (s *Options) Serialize(data map[string]any) (string, error) {
 	return string(value), nil
 }
 func (s *Options) UnSerialize(value string) (map[string]any, error) {
-	var data map[string]any
+	var data map[any]any
 	err := phpserialize.Unmarshal([]byte(value), &data)
 	if err != nil {
 		return nil, err
 	}
-	return data, nil
+	val := make(map[string]any)
+	for k, v := range data {
+		val[k.(string)] = v
+	}
+	return val, nil
 }
 func Init(options *Options) gin.HandlerFunc {
 	if options.RedisStore == nil {
@@ -53,9 +57,9 @@ func Init(options *Options) gin.HandlerFunc {
 		}
 		SessionName = options.SessionName
 		SessionID, _ = Context.Cookie(options.SessionName)
+		Values = make(map[string]any)
 		if SessionID == "" {
 			SessionID = base64.URLEncoding.EncodeToString([]byte(uuid.NewString()))
-			Values = make(map[string]any)
 			Context.SetCookie(SessionName, SessionID, 864000, "/", Context.Request.Host, false, false)
 		}
 		if options.RedisKeyPrefix == "" {
@@ -63,16 +67,15 @@ func Init(options *Options) gin.HandlerFunc {
 		}
 		StoreKey = options.RedisKeyPrefix + SessionID
 		data, err := options.RedisStore.Get(StoreKey).Result()
-		if err != nil {
-			if !errors.Is(err, redis.Nil) {
-				panic(err)
-			}
-			Values = make(map[string]any)
+		if err != nil && !errors.Is(err, redis.Nil) {
+			panic(err)
 		}
-		if data != "" {
+		if len(data) > 0 {
+			fmt.Println(data)
 			Values, err = options.UnSerialize(data)
 			if err != nil {
 				fmt.Println(err)
+				Values = make(map[string]any)
 			}
 		}
 		Session = options
