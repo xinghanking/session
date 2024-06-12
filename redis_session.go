@@ -3,6 +3,7 @@ package redis_session
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"github.com/elliotchance/phpserialize"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
@@ -21,23 +22,45 @@ type Options struct {
 }
 
 var Session *Options
-var Values map[any]any
+var Values map[string]any
 var SessionID string
 var SessionName string
 var StoreKey string
 
-func (s *Options) Serialize(data map[any]any) ([]byte, error) {
-	value, err := phpserialize.Marshal(data, nil)
+func (s *Options) Serialize(data map[string]any) (string, error) {
+	value, err := phpserialize.Marshal(data, &phpserialize.MarshalOptions{OnlyStdClass: true})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return value, nil
+	return string(value), nil
 }
 
-func (s *Options) UnSerialize(value []byte) (map[any]any, error) {
+func (s *Options) UnSerialize(value []byte) (map[string]any, error) {
 	data := make(map[any]any)
 	err := phpserialize.Unmarshal(value, &data)
-	return data, err
+	if err == nil && len(data) > 0 {
+		val := make(map[string]any)
+		for k, v := range data {
+			val[k.(string)] = ConvertMap(v)
+		}
+		return val, nil
+	}
+	return make(map[string]any), err
+}
+
+func ConvertMap(input any) any {
+	switch d := input.(type) {
+	case map[any]any:
+		output := make(map[string]any)
+		for k, v := range d {
+			output[k.(string)] = ConvertMap(v)
+		}
+		return output
+	case []any:
+		return d[:]
+	default:
+		return input
+	}
 }
 
 func Init(options *Options) gin.HandlerFunc {
@@ -51,7 +74,6 @@ func Init(options *Options) gin.HandlerFunc {
 		}
 		SessionName = options.SessionName
 		SessionID, _ = Context.Cookie(options.SessionName)
-		Values = make(map[any]any)
 		if SessionID == "" {
 			SessionID = base64.URLEncoding.EncodeToString([]byte(uuid.NewString()))
 			Context.SetCookie(SessionName, SessionID, 864000, "/", Context.Request.Host, false, false)
@@ -60,15 +82,17 @@ func Init(options *Options) gin.HandlerFunc {
 			options.RedisKeyPrefix = "PHPREDIS_SESSION:"
 		}
 		StoreKey = options.RedisKeyPrefix + SessionID
-		data, err := options.RedisStore.Get(StoreKey).Result()
+		data, err := options.RedisStore.Get(StoreKey).Bytes()
 		if err != nil && !errors.Is(err, redis.Nil) {
 			panic(err)
 		}
-		if len(data) > 0 {
-			Values, err = options.UnSerialize([]byte(data))
-			if err != nil {
-				panic(err)
-			}
+		Values, err = options.UnSerialize(data)
+		if err != nil {
+			fmt.Println(err)
+			panic(err)
+		}
+		if Values == nil || len(Values) == 0 {
+			Values = make(map[string]any)
 		}
 		Session = options
 		defer Save()
@@ -80,7 +104,11 @@ func Set(key string, value any) {
 	Values[key] = value
 }
 func Get(key string) any {
-	return Values[key]
+	v, ok := Values[key]
+	if !ok {
+		return nil
+	}
+	return v
 }
 func Del(key string) {
 	delete(Values, key)
@@ -88,11 +116,13 @@ func Del(key string) {
 func Save() {
 	if Values != nil && len(Values) > 0 {
 		data, err := Session.Serialize(Values)
-		if err == nil {
+		if err == nil && data != "" {
 			err = Session.RedisStore.Set(StoreKey, data, Session.Expiration).Err()
 		}
 		if err != nil {
+
 			panic(err)
+
 		}
 	}
 }
