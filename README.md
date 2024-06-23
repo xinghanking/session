@@ -1,5 +1,5 @@
 # session
-本session包是一个实现与PHP程序共用redis存储session数据的包。
+xinghanking/session包是一个实现与PHP程序共用redis存储session数据的包。
 php的session除了文件存储这种方式，还可以使用redis存储。
 对于php如何通过在php.ini中设置使用redis做session存储，在此略过。
 本包暂时只支持php.ini的serialize_handler设置为php_serialize的情况。
