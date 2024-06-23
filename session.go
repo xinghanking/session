@@ -127,7 +127,8 @@ func Set(key string, value any) {
 func Get(key string) any {
 	v, ok := Values[key]
 	if !ok {
-		panic("key not found")
+		fmt.Println("key not found")
+		return nil
 	}
 	return v
 }
