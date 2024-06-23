@@ -1,4 +1,4 @@
-package redis_session
+package session
 
 import (
 	"encoding/base64"
@@ -21,7 +21,7 @@ type Options struct {
 	Expiration     time.Duration
 }
 
-var Session *Options
+var Session Options
 var Values map[string]any
 var SessionID string
 var SessionName string
@@ -63,58 +63,86 @@ func ConvertMap(input any) any {
 	}
 }
 
-func Init(options *Options) gin.HandlerFunc {
+var setCookie func(value string, maxAge int)
+
+func Init(options Options) gin.HandlerFunc {
 	if options.RedisStore == nil {
 		err := errors.New("redis store is nil")
 		panic(err)
 	}
+	if options.RedisKeyPrefix == "" {
+		options.RedisKeyPrefix = redisKeyPrefix
+	}
+	if options.MaxAge == 0 {
+		options.MaxAge = maxAge
+	}
 	return func(Context *gin.Context) {
+		setCookie = func(value string, maxAge int) {
+			if maxAge == 0 {
+				maxAge = options.MaxAge
+			}
+			Context.SetCookie(SessionName, value, maxAge, "/", Context.Request.Host, options.Secure, options.HttpOnly)
+		}
 		if options.SessionName == "" {
-			options.SessionName = "PHPSESSID"
+			options.SessionName = sessionName
 		}
 		SessionName = options.SessionName
 		SessionID, _ = Context.Cookie(options.SessionName)
-		if SessionID == "" {
-			SessionID = base64.URLEncoding.EncodeToString([]byte(uuid.NewString()))
-			Context.SetCookie(SessionName, SessionID, 864000, "/", Context.Request.Host, false, false)
-		}
-		if options.RedisKeyPrefix == "" {
-			options.RedisKeyPrefix = "PHPREDIS_SESSION:"
-		}
-		StoreKey = options.RedisKeyPrefix + SessionID
-		data, err := options.RedisStore.Get(StoreKey).Bytes()
+		Session = options
+		Start()
+		defer Save()
+		Context.Next()
+	}
+}
+
+func Start() {
+	if SessionID == "" {
+		SessionID = base64.URLEncoding.EncodeToString([]byte(uuid.NewString()))
+		setCookie(SessionID, Session.MaxAge)
+		StoreKey = Session.RedisKeyPrefix + SessionID
+		Values = make(map[string]any)
+	} else {
+		StoreKey = Session.RedisKeyPrefix + SessionID
+		data, err := Session.RedisStore.Get(StoreKey).Bytes()
 		if err != nil && !errors.Is(err, redis.Nil) {
 			panic(err)
 		}
-		Values, err = options.UnSerialize(data)
-		if err != nil {
-			fmt.Println(err)
-			panic(err)
+		if len(data) > 0 {
+			Values, err = Session.UnSerialize(data)
+			if err != nil {
+				fmt.Println(err)
+				panic(err)
+			}
 		}
-		if Values == nil || len(Values) == 0 {
+		if Values == nil {
 			Values = make(map[string]any)
 		}
-		Session = options
-		defer Save()
-		Context.Next()
 	}
 }
 
 func Set(key string, value any) {
 	Values[key] = value
 }
+
 func Get(key string) any {
 	v, ok := Values[key]
 	if !ok {
-		return nil
+		panic("key not found")
 	}
 	return v
 }
+
+func Exist(key string) bool {
+	_, ok := Values[key]
+	return ok
+}
+
 func Del(key string) {
 	delete(Values, key)
 }
+
 func Save() {
-	if Values != nil && len(Values) > 0 {
+	if Values != nil {
 		data, err := Session.Serialize(Values)
 		if err == nil && data != "" {
 			err = Session.RedisStore.Set(StoreKey, data, Session.Expiration).Err()
@@ -126,7 +154,11 @@ func Save() {
 		}
 	}
 }
+
 func Destroy() {
 	Values = nil
 	Session.RedisStore.Del(StoreKey)
+	setCookie("", -1)
+	SessionName = sessionName
+	SessionID = ""
 }
