@@ -1,4 +1,4 @@
-module github.com/xinghanking/redis_session
+module github.com/xinghanking/session
 
 go 1.22.2
 
