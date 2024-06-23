@@ -24,11 +24,13 @@ Client = redis.NewClient(&redis.Options{
 	DB:       0,
 	//…………
 })
-router.Use(redis_session.Init(&redis_session.Options{
-    RedisStore:     Client,              //必传
-    SessionName：   "PHPSESSID",         //存储session_id的cookie名，默认值："PHPSESSID"
-    RedisKeyPrefix："PHPREDIS_SESSION:", //session数据存储在redis中的KEY前缀名，默认值：" PHPREDIS_SESSION:"
+router.Use(redis_session.Init(redis_session.Options{
+    RedisStore:      Client,              //必传
+    SessionName:    "PHPSESSID",         //存储session_id的cookie名，默认值："PHPSESSID"
+    RedisKeyPrefix: "PHPREDIS_SESSION:", //session数据存储在redis中的KEY前缀名，默认值：" PHPREDIS_SESSION:"
     MaxAge:         86400,               //保存session_id值的cookie最大生存时间，单位：秒，默认值：86400
+    Secure:         false,               
+    HttpOnly:       false,
     Expiration:     0,                   //redis中保存session数据的时长，默认值：0
 }))
 router.GET("/", func(context *gin.Context){
